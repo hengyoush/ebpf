@@ -432,6 +432,17 @@ func (spec *MapSpec) createMap(inner *sys.FD, opts MapOptions) (_ *Map, err erro
 
 	fd, err := sys.MapCreate(&attr)
 
+	// BPF_MAP_TYPE_RINGBUF's max_entries must be a power-of-2 multiple of kernel's page size.
+	if errors.Is(err, unix.EINVAL) &&
+		(attr.MapType == sys.BPF_MAP_TYPE_RINGBUF || attr.MapType == sys.BPF_MAP_TYPE_USER_RINGBUF) {
+		pageSize := uint32(os.Getpagesize())
+		maxEntries := attr.MaxEntries
+		nPages := maxEntries / pageSize
+		if !(maxEntries%pageSize == 0 && (nPages != 0 && (nPages&(nPages-1)) == 0)) {
+			return nil, errors.New(fmt.Sprintf("EINVAL (ring map size %d not a power of two page size(pageSize %d))", maxEntries, pageSize))
+		}
+	}
+
 	// Some map types don't support BTF k/v in earlier kernel versions.
 	// Remove BTF metadata and retry map creation.
 	if (errors.Is(err, sys.ENOTSUPP) || errors.Is(err, unix.EINVAL)) && attr.BtfFd != 0 {
